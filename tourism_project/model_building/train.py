@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import GridSearchCV
+# from sklearn.model_selection import GridSearchCV # No longer needed as best params are set directly
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -19,7 +19,7 @@ X_test = pd.read_csv('Xtest.csv')
 y_train = pd.read_csv('ytrain.csv').squeeze() # Use squeeze to convert to Series
 y_test = pd.read_csv('ytest.csv').squeeze()   # Use squeeze to convert to Series
 
-# Define numerical and categorical features
+# Define numerical and categorical features (consistent with prep.py and EDA)
 numerical_features = [
     'Age', 'DurationOfPitch', 'NumberOfPersonVisiting', 'NumberOfFollowups',
     'PreferredPropertyStar', 'NumberOfTrips', 'NumberOfChildrenVisiting',
@@ -30,21 +30,9 @@ categorical_features = [
     'MaritalStatus', 'Designation', 'CityTier', 'Passport', 'OwnCar'
 ]
 
-# --- Preprocessing Steps ---
+# --- Preprocessing Steps (retained for robustness beyond prep.py's cleaning) ---
 
-# 1. Handle Gender inconsistency (map unknown values to 'Male', the majority class)
-def clean_gender(df):
-    if 'Gender' in df.columns:
-        # Standardize capitalization and remove whitespace
-        df['Gender'] = df['Gender'].astype(str).str.strip().str.capitalize()
-        # Map any value that is not 'Male' or 'Female' to 'Male' (majority class assumption)
-        df.loc[~df['Gender'].isin(['Male', 'Female']), 'Gender'] = 'Male'
-    return df
-
-X_train = clean_gender(X_train)
-X_test = clean_gender(X_test)
-
-# 2. Outlier handling for numerical features (capping using insights from EDA)
+# Outlier handling for numerical features (capping using insights from EDA)
 def cap_outliers(df):
     # DurationOfPitch: Cap at 60 minutes
     df['DurationOfPitch'] = np.clip(df['DurationOfPitch'], None, 60)
@@ -78,34 +66,35 @@ preprocessor = ColumnTransformer(
     transformers=[
         ('num', numeric_transformer, numerical_features),
         ('cat', categorical_transformer, categorical_features)
-    ])
+    ],
+    remainder='passthrough' # Keep any other columns not explicitly transformed
+)
 
-# Create the full pipeline with preprocessor and XGBoost classifier
-pipeline = Pipeline(steps=[
-    ('preprocessor', preprocessor),
-    ('classifier', XGBClassifier(objective='binary:logistic', eval_metric='logloss', random_state=42))
-])
-
-# Define hyperparameter grid for GridSearchCV
-# Parameters are slightly reduced for faster execution in a CI/CD pipeline context
-param_grid = {
-    'classifier__n_estimators': [50, 100],  # Number of boosting rounds
-    'classifier__learning_rate': [0.05, 0.1], # Step size shrinkage
-    'classifier__max_depth': [3, 5],        # Maximum depth of a tree
-    'classifier__subsample': [0.7, 1.0],    # Subsample ratio of the training instance
-    'classifier__colsample_bytree': [0.7, 1.0] # Subsample ratio of columns when constructing each tree
+# --- Use the best performing XGBoost hyperparameters from previous execution ----
+# Best parameters found: {'xgbclassifier__learning_rate': 0.2, 'xgbclassifier__max_depth': 7, 'xgbclassifier__n_estimators': 200}
+best_xgb_params = {
+    'learning_rate': 0.2,
+    'max_depth': 7,
+    'n_estimators': 200,
+    'objective': 'binary:logistic',
+    'eval_metric': 'logloss',
+    'random_state': 42
 }
 
-# Perform GridSearchCV for hyperparameter tuning
-print("Starting GridSearchCV...")
-grid_search = GridSearchCV(pipeline, param_grid, cv=3, scoring='f1', n_jobs=-1, verbose=1) # n_jobs=-1 uses all available cores
-grid_search.fit(X_train, y_train)
+# Create the full pipeline with preprocessor and the best XGBoost classifier
+pipeline = Pipeline(steps=[
+    ('preprocessor', preprocessor),
+    ('classifier', XGBClassifier(**best_xgb_params))
+])
 
-# Get the best model from grid search
-best_model = grid_search.best_estimator_
+# Train the final model with the best hyperparameters (no GridSearchCV needed)
+print("Training final XGBoost model with best hyperparameters...")
+pipeline.fit(X_train, y_train)
 
-print(f"\nBest parameters found: {grid_search.best_params_}")
-print(f"Best F1 score from cross-validation: {grid_search.best_score_:.4f}")
+# The trained pipeline is now our best model
+best_model = pipeline
+
+print(f"\nXGBoost Model Trained with Parameters: {best_xgb_params}")
 
 # Evaluate the best model on the test set
 y_pred = best_model.predict(X_test)
@@ -128,7 +117,8 @@ mlflow.set_experiment("Tourism Package Prediction") # Set the experiment name
 
 with mlflow.start_run():
     print("\nLogging parameters and metrics to MLflow...")
-    mlflow.log_params(grid_search.best_params_)
+    # Log the explicitly set best parameters
+    mlflow.log_params(best_xgb_params)
     mlflow.log_metric("test_accuracy", accuracy)
     mlflow.log_metric("test_precision", precision)
     mlflow.log_metric("test_recall", recall)
