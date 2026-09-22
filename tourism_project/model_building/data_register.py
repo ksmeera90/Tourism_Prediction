@@ -16,9 +16,9 @@ if rows_skipped:
 expected_columns = [
     "Age", "DurationOfPitch", "NumberOfPersonVisiting", "NumberOfFollowups",
     "PreferredPropertyStar", "NumberOfTrips", "NumberOfChildrenVisiting",
-    "MonthlyIncome", "PitchSatisfactionScore"
+    "MonthlyIncome", "PitchSatisfactionScore",
     "TypeofContact", "Occupation", "Gender", "ProductPitched",
-    "MaritalStatus", "Designation", "CityTier", "Passport", "OwnCar",
+    "MaritalStatus", "Designation", "CityTier", "Passport", "OwnCar"
 ]
 missing = [c for c in expected_columns if c not in df.columns]
 if missing:
